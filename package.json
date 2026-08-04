@@ -1,0 +1,27 @@
+{
+  "name": "above-the-line",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Holds BTC while the close is above its long moving average, sits in cash below it. Weekly signals, Bitvavo, deployed on Vercel.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "backtest": "tsx scripts/backtest.ts",
+    "test": "tsx scripts/test-strategy.ts"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.6.1",
+    "next": "^16.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.7.0"
+  }
+}
