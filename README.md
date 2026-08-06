@@ -40,9 +40,14 @@ The bot cannot move money out of your account, by construction:
   trading, not a mock.
 - `KILL_SWITCH=true` stops all activity immediately, checked before every order.
 - `MAX_ALLOCATION_EUR` caps what the bot may ever deploy.
-- `ACCOUNT_VALUE_CEILING_EUR` makes the bot refuse to trade at all if the account
-  holds more than expected, so it can never touch money you did not mean to expose.
-- `MAX_TRADES_PER_MONTH` halts trading if something starts looping.
+- `ACCOUNT_VALUE_CEILING_EUR` makes the bot refuse to *buy* if the account holds
+  more than expected, so it can never touch money you did not mean to expose.
+- `MAX_TRADES_PER_MONTH` stops it opening new positions if something starts looping.
+- Those last two gate entries only. An exit and the stop loss always run, because
+  a cap that blocked selling would trap a position: a holding that grew past the
+  ceiling, or a month that ran out of trades, would freeze with the stop loss
+  switched off. Selling is only possible while long, and going long is capped, so
+  letting exits through cannot loop.
 - The cron endpoint requires `Authorization: Bearer $CRON_SECRET`. Without it,
   nobody can trigger a trade by hitting the URL.
 - Long or cash only. No shorting, no margin, no leverage, one position at a time.
@@ -59,12 +64,21 @@ The bot cannot move money out of your account, by construction:
 The whole thing is one pure function in `src/lib/strategy.ts`. If you want to
 change the rules, that is the only file that decides anything.
 
+### When a signal actually executes
+
+Decisions only ever use *closed* daily candles, so the job running at 07:00 UTC
+reads yesterday's bar. With `SIGNAL_WEEKDAY=1` that means the Monday close is the
+signal, and the order goes in on **Tuesday** morning. The backtest fills at the
+close of the deciding bar, so reality lags it by roughly a day. On a 140-day
+trend filter that gap is noise, but it is real and it is not modelled.
+
 ## Getting started
 
 ```bash
 npm install
 npm test          # 31 correctness checks, no network needed
 npm run backtest  # pulls real Bitvavo history and validates the strategy
+npm run dry-run   # does one scheduled run locally, exactly as the cron would
 ```
 
 `npm run backtest` is the important one. It:
@@ -79,8 +93,10 @@ npm run backtest  # pulls real Bitvavo history and validates the strategy
 Run it before you decide anything. If the out-of-sample result does not convince
 you, do not fund the bot.
 
-Local dry runs store state in `.bot-state.json`, so you can run it repeatedly and
-watch the paper position develop.
+`npm run dry-run` takes the same code path as the production cron job, reading
+`.env.local` if you have one. It stores state in `.bot-state.json`, so you can
+run it on successive days and watch the paper position and equity curve develop
+before anything is deployed.
 
 ## Deploying
 
@@ -110,11 +126,18 @@ stop loss. A more frequent schedule fails at deploy time on Hobby.
 
 Only after a backtest you believe and a paper run that behaved:
 
-1. Fund the Bitvavo account with EUR (SEPA deposits are free). DKK 1,000 is about
-   EUR 134 — match `MAX_ALLOCATION_EUR` to what you actually deposit.
+1. Fund the Bitvavo account with EUR (SEPA deposits are free). Set
+   `MAX_ALLOCATION_EUR` a little *below* what you deposited, so the 0.25% fee
+   cannot push an order past your balance — on a EUR 100 deposit, use 95.
 2. Create the API key with **View + Trade only**. Set `BITVAVO_API_KEY` and
    `BITVAVO_API_SECRET` in Vercel.
-3. Set `TRADING_ENABLED=true` and redeploy.
+3. Set `BITVAVO_OPERATOR_ID` to any positive whole number. Bitvavo has rejected
+   orders without one since 1 June 2025, so a live trade fails without it.
+4. Set `TRADING_ENABLED=true` and redeploy.
+
+Set `MAX_ALLOCATION_EUR` before the first run if you can. The paper wallet seeds
+itself from that value once and then keeps its own balance, so changing it later
+does not retroactively rescale a paper run already in progress.
 
 The dashboard badge switches from "Paper trading" to "Live money", and trades stop
 being labelled "(paper)".
@@ -155,5 +178,6 @@ src/lib/tax.ts        FIFO cost basis and the SKAT summary
 src/lib/state.ts      persistence: Vercel Blob, or a local file when developing
 src/app/page.tsx      the dashboard
 scripts/backtest.ts   npm run backtest
+scripts/dry-run.ts    npm run dry-run, one scheduled run on your own machine
 scripts/test-strategy.ts  npm test
 ```

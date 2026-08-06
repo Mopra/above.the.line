@@ -174,24 +174,51 @@ function summariseOrder(order: RawOrder): FillResult {
   };
 }
 
+/**
+ * Bitvavo rejects any create, update or cancel order request without an integer
+ * `operatorId` (mandatory since 1 June 2025). It must be sent as a number, not a
+ * string. Checking it here turns a confusing HTTP 400 into a clear message
+ * before an order is ever sent.
+ */
+function checkOperatorId(operatorId: number): void {
+  if (!Number.isSafeInteger(operatorId) || operatorId <= 0) {
+    throw new Error(
+      `BITVAVO_OPERATOR_ID must be a positive whole number, got "${operatorId}". ` +
+        'Bitvavo rejects orders without one.',
+    );
+  }
+}
+
 /** Spend `amountQuote` EUR on a market buy. */
-export async function marketBuy(market: string, amountQuote: number): Promise<FillResult> {
+export async function marketBuy(
+  market: string,
+  amountQuote: number,
+  operatorId: number,
+): Promise<FillResult> {
+  checkOperatorId(operatorId);
   const order = await privateCall<RawOrder>('POST', '/order', {
     market,
     side: 'buy',
     orderType: 'market',
     amountQuote: amountQuote.toFixed(2),
+    operatorId,
   });
   return summariseOrder(order);
 }
 
 /** Sell `amount` BTC at market. */
-export async function marketSell(market: string, amount: number): Promise<FillResult> {
+export async function marketSell(
+  market: string,
+  amount: number,
+  operatorId: number,
+): Promise<FillResult> {
+  checkOperatorId(operatorId);
   const order = await privateCall<RawOrder>('POST', '/order', {
     market,
     side: 'sell',
     orderType: 'market',
     amount: amount.toFixed(8),
+    operatorId,
   });
   return summariseOrder(order);
 }

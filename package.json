@@ -9,6 +9,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "backtest": "tsx scripts/backtest.ts",
+    "dry-run": "tsx scripts/dry-run.ts",
     "test": "tsx scripts/test-strategy.ts"
   },
   "dependencies": {

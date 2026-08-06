@@ -11,3 +11,4 @@ build/
 next-env.d.ts
 /data/*.json
 /data/*.csv
+.bot-state.json

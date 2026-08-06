@@ -24,6 +24,14 @@ export const config = {
   maxAllocationEur: num('MAX_ALLOCATION_EUR', 134),
   accountValueCeilingEur: num('ACCOUNT_VALUE_CEILING_EUR', 200),
 
+  /**
+   * Bitvavo has required an integer `operatorId` on every create, update and
+   * cancel order request since 1 June 2025. It identifies which bot or person
+   * placed an order; the value is yours to choose. Orders without it are
+   * rejected, so this matters the moment TRADING_ENABLED becomes true.
+   */
+  bitvavoOperatorId: num('BITVAVO_OPERATOR_ID', 1),
+
   smaDays: num('SMA_DAYS', 140),
   signalWeekday: num('SIGNAL_WEEKDAY', 1),
   stopLossPct: num('STOP_LOSS_PCT', 20),

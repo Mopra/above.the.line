@@ -121,19 +121,21 @@ export async function runOnce(): Promise<RunReport> {
   });
 
   // ---- Hard limits, checked before anything can be sent ------------------
+  // KILL_SWITCH and `halted` stop everything, including exits. Both are switches
+  // a human throws deliberately, and the documented way to stop and sell is to
+  // do the sale yourself in the Bitvavo app.
   if (config.killSwitch) return finish(block('KILL_SWITCH is true.'));
   if (state.halted) return finish(block(`Bot is halted: ${state.haltReason}`));
 
+  // The capital caps below are different: they exist to limit how much money the
+  // bot may ever *deploy*, so they gate entries only. Blocking an exit would
+  // trap a position — a holding that grew past the ceiling, or a month that ran
+  // out of trades, would freeze with the stop loss disabled. A sell can only
+  // happen while long, and going long is capped, so letting exits through
+  // cannot cause a runaway loop.
   const accountValue = exchangeEur + btcAvailable * livePrice;
-  if (hasCredentials() && accountValue > config.accountValueCeilingEur) {
-    return finish(
-      block(
-        `Account holds EUR ${accountValue.toFixed(2)}, above the ` +
-          `EUR ${config.accountValueCeilingEur} ceiling. Refusing to trade money ` +
-          'the bot was not given.',
-      ),
-    );
-  }
+  const overCeiling =
+    hasCredentials() && accountValue > config.accountValueCeilingEur;
 
   let action = d.action;
 
@@ -147,20 +149,34 @@ export async function runOnce(): Promise<RunReport> {
     }
   }
 
-  if (action !== 'HOLD' && tradesThisMonth(state, now) >= config.maxTradesPerMonth) {
-    return finish(
-      block(
-        `Already ${tradesThisMonth(state, now)} trades this month, cap is ` +
-          `${config.maxTradesPerMonth}. Something is wrong, so nothing is sent.`,
-      ),
-    );
-  }
-
   // ---- Execute -----------------------------------------------------------
   let trade: Trade | undefined;
 
   if (action === 'ENTER') {
-    const budget = Math.min(config.maxAllocationEur, cashEur);
+    if (overCeiling) {
+      return finish(
+        block(
+          `Account holds EUR ${accountValue.toFixed(2)}, above the ` +
+            `EUR ${config.accountValueCeilingEur} ceiling. Refusing to buy with ` +
+            'money the bot was not given. Exits and the stop loss still work.',
+        ),
+      );
+    }
+    if (tradesThisMonth(state, now) >= config.maxTradesPerMonth) {
+      return finish(
+        block(
+          `Already ${tradesThisMonth(state, now)} trades this month, cap is ` +
+            `${config.maxTradesPerMonth}. Something is wrong, so no new position ` +
+            'is opened. Exits and the stop loss still work.',
+        ),
+      );
+    }
+    // Never bid the whole balance. If the exchange charges the taker fee on top
+    // of the quote amount rather than inside it, an order for exactly the cash
+    // on hand is rejected for insufficient funds. Holding the fee back costs
+    // 0.25% of exposure and removes that failure mode either way.
+    const spendable = cashEur / (1 + config.takerFeeBps / 10_000);
+    const budget = Math.min(config.maxAllocationEur, spendable);
     if (budget < config.minOrderEur) {
       return finish(
         block(
@@ -268,7 +284,7 @@ type SimFill = FillResult & { live: boolean };
 
 async function buy(budgetEur: number, refPrice: number): Promise<SimFill> {
   if (config.tradingEnabled && hasCredentials()) {
-    const fill = await marketBuy(config.market, budgetEur);
+    const fill = await marketBuy(config.market, budgetEur, config.bitvavoOperatorId);
     return { ...fill, live: true };
   }
   const fillPrice = refPrice * (1 + config.slippageBps / 10_000);
@@ -287,7 +303,7 @@ async function buy(budgetEur: number, refPrice: number): Promise<SimFill> {
 
 async function sell(qty: number, refPrice: number): Promise<SimFill> {
   if (config.tradingEnabled && hasCredentials()) {
-    const fill = await marketSell(config.market, qty);
+    const fill = await marketSell(config.market, qty, config.bitvavoOperatorId);
     return { ...fill, live: true };
   }
   const fillPrice = refPrice * (1 - config.slippageBps / 10_000);
