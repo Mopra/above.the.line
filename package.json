@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "backtest": "tsx scripts/backtest.ts",
     "dry-run": "tsx scripts/dry-run.ts",
+    "setup:vercel": "bash scripts/setup-vercel.sh",
     "test": "tsx scripts/test-strategy.ts"
   },
   "dependencies": {
