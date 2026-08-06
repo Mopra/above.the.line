@@ -146,6 +146,11 @@ h2 {
 .dot-muted {
   background: var(--text-muted);
 }
+/* Paper mode. Blue rather than grey: the bot is running, it is simply not
+   spending real money. Grey read as "switched off", which was wrong. */
+.dot-info {
+  background: var(--series-1);
+}
 
 /* --- hero ---------------------------------------------------------------- */
 .hero {

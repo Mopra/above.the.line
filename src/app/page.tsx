@@ -37,6 +37,39 @@ function when(ms: number | null): string {
   });
 }
 
+const HOUR = 3_600_000;
+
+function age(hours: number): string {
+  if (hours < 1) return `${Math.max(1, Math.round(hours * 60))} min`;
+  if (hours < 48) return `${Math.round(hours)} hours`;
+  return `${Math.round(hours / 24)} days`;
+}
+
+/**
+ * Is the scheduled job actually alive? This is a different question from
+ * whether real money is at stake, and the dashboard used to answer only the
+ * second one — leaving a running paper bot looking switched off.
+ *
+ * The job runs daily and Vercel lets the time drift by up to an hour, so a gap
+ * beyond 26 hours means a run was genuinely missed rather than merely late.
+ */
+function heartbeat(lastRunTime: number | null, now: number) {
+  if (!lastRunTime) {
+    return { dot: 'dot-warning', label: 'Waiting for first run' };
+  }
+  const hours = (now - lastRunTime) / HOUR;
+  if (hours <= 26) return { dot: 'dot-good', label: `Ran ${age(hours)} ago` };
+  if (hours <= 50) return { dot: 'dot-warning', label: `Last run ${age(hours)} ago` };
+  return { dot: 'dot-critical', label: `No run in ${age(hours)}` };
+}
+
+/** The cron fires at 07:00 UTC daily; see vercel.json. */
+function nextRun(now: number): number {
+  const d = new Date(now);
+  const next = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 7);
+  return next > now ? next : next + 24 * HOUR;
+}
+
 export default async function Page() {
   const state = await loadState();
   const startEquity = config.maxAllocationEur;
@@ -67,6 +100,8 @@ export default async function Page() {
 
   const trades = [...state.trades].reverse().slice(0, 40);
   const mode = config.tradingEnabled ? 'Live money' : 'Paper trading';
+  const now = Date.now();
+  const beat = heartbeat(state.lastRunTime, now);
   const deltaClass = returnPct > 0.05 ? 'up' : returnPct < -0.05 ? 'down' : 'flat';
 
   return (
@@ -81,8 +116,12 @@ export default async function Page() {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <span className="badge">
+            <span className={`dot ${beat.dot}`} />
+            {beat.label}
+          </span>
+          <span className="badge">
             <span
-              className={config.tradingEnabled ? 'dot dot-warning' : 'dot dot-muted'}
+              className={config.tradingEnabled ? 'dot dot-warning' : 'dot dot-info'}
             />
             {mode}
           </span>
@@ -263,7 +302,9 @@ export default async function Page() {
       </section>
 
       <p className="foot">
-        Last run {when(state.lastRunTime)}. {state.lastNote ?? ''}
+        Last run {when(state.lastRunTime)}, next {when(nextRun(now))}. Signals are
+        weekly, so most days it deliberately does nothing.
+        {state.lastNote ? ` ${state.lastNote}` : ''}
         <br />
         Gains and losses are shown separately because Danish rules tax them at
         different rates and do not let you net one against the other. Estimated tax
