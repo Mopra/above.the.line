@@ -6,8 +6,15 @@ function statePath(): string {
   return `${config.statePrefix}/state.json`;
 }
 
+/**
+ * Two ways a deployment can reach the store. The classic one is a read-write
+ * token. The one `vercel blob create-store` wires up now is OIDC: connecting a
+ * store sets BLOB_STORE_ID, and Vercel injects VERCEL_OIDC_TOKEN at runtime to
+ * authenticate against it. The SDK picks up whichever is present, so either
+ * counts as having durable storage.
+ */
 function hasBlobStore(): boolean {
-  return Boolean(process.env.BLOB_READ_WRITE_TOKEN);
+  return Boolean(process.env.BLOB_READ_WRITE_TOKEN || process.env.BLOB_STORE_ID);
 }
 
 /**
@@ -45,9 +52,10 @@ async function writeLocal(state: BotState): Promise<void> {
 function requireDurableStorage(): void {
   if (process.env.VERCEL && !hasBlobStore()) {
     throw new Error(
-      'No BLOB_READ_WRITE_TOKEN in this deployment, so there is nowhere durable ' +
-        'to save state. Connect a Vercel Blob store to the project (Storage tab ' +
-        '> Connect Project), then redeploy. Refusing to trade without memory.',
+      'No Blob store reachable from this deployment (neither BLOB_STORE_ID nor ' +
+        'BLOB_READ_WRITE_TOKEN is set), so there is nowhere durable to save ' +
+        'state. Connect a Vercel Blob store to the project (Storage tab > ' +
+        'Connect Project), then redeploy. Refusing to trade without memory.',
     );
   }
 }
