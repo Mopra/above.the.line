@@ -35,6 +35,23 @@ async function writeLocal(state: BotState): Promise<void> {
   await writeFile(localFile(), JSON.stringify(state, null, 2), 'utf8');
 }
 
+/**
+ * On Vercel the filesystem is read-only apart from /tmp, so the local fallback
+ * cannot work there: it fails with an unhelpful EROFS deep inside a write. Say
+ * plainly what is wrong instead, because a run that cannot save its state has
+ * not really happened — it would re-decide the same signal tomorrow with no
+ * memory of the position it just took.
+ */
+function requireDurableStorage(): void {
+  if (process.env.VERCEL && !hasBlobStore()) {
+    throw new Error(
+      'No BLOB_READ_WRITE_TOKEN in this deployment, so there is nowhere durable ' +
+        'to save state. Connect a Vercel Blob store to the project (Storage tab ' +
+        '> Connect Project), then redeploy. Refusing to trade without memory.',
+    );
+  }
+}
+
 export async function loadState(): Promise<BotState> {
   if (!hasBlobStore()) {
     return (await readLocal()) ?? initialState();
@@ -55,6 +72,7 @@ export async function loadState(): Promise<BotState> {
 }
 
 export async function saveState(state: BotState): Promise<void> {
+  requireDurableStorage();
   if (!hasBlobStore()) {
     await writeLocal(state);
     return;
