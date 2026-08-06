@@ -39,14 +39,34 @@ export interface Trade {
   live: boolean;
 }
 
-/** One snapshot per scheduled run, so the dashboard can draw a curve. */
+/** What the bot decided on a given run. */
+export type RunAction = 'HOLD' | 'ENTER' | 'EXIT' | 'BLOCKED';
+
+/**
+ * One snapshot per scheduled run, so the dashboard can draw a curve.
+ *
+ * The last three fields are the paper run's actual value as an experiment.
+ * Price alone tells you what happened; price against the trend filter tells you
+ * how close each call was, which is the thing worth knowing when you later ask
+ * whether SMA_DAYS should have been shorter. They are optional because points
+ * written before they existed do not have them.
+ */
 export interface EquityPoint {
   time: number;
   /** Total EUR value: cash plus BTC at the price of the moment. */
   equity: number;
   /** BTC-EUR price at the snapshot, used for the buy-and-hold comparison. */
   price: number;
+  /** The trend filter at this run, or null before there is enough history. */
+  sma?: number | null;
+  /** What the run decided to do. */
+  action?: RunAction;
+  /** Why, in plain language. The block reason when something was refused. */
+  note?: string;
 }
+
+/** Which wallet the current ledger belongs to. */
+export type TradingMode = 'PAPER' | 'LIVE';
 
 export interface BotState {
   position: Position;
@@ -72,6 +92,14 @@ export interface BotState {
    * null means "not started yet", so the engine seeds it from MAX_ALLOCATION_EUR.
    */
   simCashEur: number | null;
+  /**
+   * Which wallet this ledger belongs to. Paper and live positions cannot share
+   * one: going live while holding a paper position would leave the bot certain
+   * it owns BTC it never bought. The engine archives and starts clean when this
+   * changes. null means a state written before the field existed, which is
+   * adopted rather than reset.
+   */
+  mode: TradingMode | null;
   /** Set by the engine when a hard limit trips. Requires manual reset. */
   halted: boolean;
   haltReason: string | null;
@@ -94,6 +122,7 @@ export function initialState(): BotState {
     trades: [],
     history: [],
     simCashEur: null,
+    mode: null,
     halted: false,
     haltReason: null,
     lastNote: null,

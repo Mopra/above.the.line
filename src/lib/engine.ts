@@ -7,10 +7,18 @@ import {
   type FillResult,
 } from './bitvavo';
 import { config, hasCredentials } from './config';
-import { loadState, saveState } from './state';
+import { archiveState, loadState, saveState } from './state';
 import { decide, weekKey, type StrategyParams } from './strategy';
 import { sellFifo } from './tax';
-import type { BotState, Candle, Trade } from './types';
+import {
+  initialState,
+  type BotState,
+  type Candle,
+  type EquityPoint,
+  type RunAction,
+  type Trade,
+  type TradingMode,
+} from './types';
 
 export interface RunReport {
   ranAt: number;
@@ -23,6 +31,8 @@ export interface RunReport {
   equityEur: number;
   trade?: Trade;
   blockedBy?: string;
+  /** Set when a paper/live switch archived the previous ledger and started fresh. */
+  archivedTo?: string;
 }
 
 function params(): StrategyParams {
@@ -53,14 +63,27 @@ function dayStamp(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-/** One equity snapshot per calendar day, so a repeat run does not duplicate. */
+/**
+ * One equity snapshot per calendar day, so a repeat run does not duplicate.
+ *
+ * The trend value and the decision are stored alongside the price, so months
+ * later you can ask how close each call was rather than only what it returned.
+ */
 function recordHistory(
   state: BotState,
   now: number,
   equityEur: number,
   price: number,
+  decision: { sma: number | null; action: RunAction; note: string },
 ): void {
-  const point = { time: now, equity: equityEur, price };
+  const point: EquityPoint = {
+    time: now,
+    equity: equityEur,
+    price,
+    sma: decision.sma,
+    action: decision.action,
+    note: decision.note,
+  };
   const last = state.history[state.history.length - 1];
   if (last && dayStamp(last.time) === dayStamp(now)) {
     state.history[state.history.length - 1] = point;
@@ -76,7 +99,25 @@ function recordHistory(
  */
 export async function runOnce(): Promise<RunReport> {
   const now = Date.now();
-  const state = await loadState();
+  let state = await loadState();
+  const live = config.tradingEnabled && hasCredentials();
+
+  // ---- Paper and live ledgers must never mix -----------------------------
+  // Going live while holding a paper position would leave the bot certain it
+  // owns BTC it never bought: it would not re-enter (already long) and could
+  // not exit (nothing to sell), so it would sit inert with the stop loss dead.
+  // Archive the old ledger and start the new mode clean. This runs before
+  // decide() reads the position, so the decision is made against the right one.
+  const modeNow: TradingMode = live ? 'LIVE' : 'PAPER';
+  let archivedTo: string | undefined;
+  if (state.mode !== null && state.mode !== modeNow) {
+    const label = `${state.mode.toLowerCase()}-${new Date(now)
+      .toISOString()
+      .replace(/[:.]/g, '-')}`;
+    archivedTo = await archiveState(state, label);
+    state = initialState();
+  }
+  state.mode = modeNow;
 
   const all = await fetchDailyCandles(config.market, 2500);
   const candles = closedCandles(all, now);
@@ -90,7 +131,6 @@ export async function runOnce(): Promise<RunReport> {
   const d = decide(candles, idx, state.position, state.entryPrice, params());
 
   const livePrice = await fetchTicker(config.market);
-  const live = config.tradingEnabled && hasCredentials();
 
   // Seed the paper-trading wallet the first time the bot ever runs.
   if (state.simCashEur === null) state.simCashEur = config.maxAllocationEur;
@@ -254,7 +294,11 @@ export async function runOnce(): Promise<RunReport> {
   }
 
   const equityNow = equity(state, livePrice, cashEur);
-  recordHistory(state, now, equityNow, livePrice);
+  recordHistory(state, now, equityNow, livePrice, {
+    sma: d.sma,
+    action,
+    note: d.reason,
+  });
   state.lastRunTime = now;
   state.lastNote = d.reason;
   await saveState(state);
@@ -269,14 +313,20 @@ export async function runOnce(): Promise<RunReport> {
     position: state.position,
     equityEur: equityNow,
     trade,
+    archivedTo,
   };
 
   async function finish(report: RunReport): Promise<RunReport> {
-    recordHistory(state, now, report.equityEur, report.price);
+    const note = report.blockedBy ?? report.reason;
+    recordHistory(state, now, report.equityEur, report.price, {
+      sma: report.sma,
+      action: report.action,
+      note,
+    });
     state.lastRunTime = now;
-    state.lastNote = report.blockedBy ?? report.reason;
+    state.lastNote = note;
     await saveState(state);
-    return report;
+    return { ...report, archivedTo };
   }
 }
 

@@ -79,6 +79,30 @@ export async function loadState(): Promise<BotState> {
   }
 }
 
+/**
+ * Keep a frozen copy of a ledger under its own key. Used when the bot switches
+ * between paper and live: the old run must not be blended into the new one, but
+ * it is the only record of how the strategy actually behaved, so throwing it
+ * away would waste the whole point of paper trading.
+ */
+export async function archiveState(state: BotState, label: string): Promise<string> {
+  const body = JSON.stringify(state, null, 2);
+  if (!hasBlobStore()) {
+    const path = `.bot-state-${label}.json`;
+    const { writeFile } = await import('node:fs/promises');
+    await writeFile(path, body, 'utf8');
+    return path;
+  }
+  const path = `${config.statePrefix}/archive/${label}.json`;
+  await put(path, body, {
+    access: 'private',
+    allowOverwrite: true,
+    contentType: 'application/json',
+    addRandomSuffix: false,
+  });
+  return path;
+}
+
 export async function saveState(state: BotState): Promise<void> {
   requireDurableStorage();
   if (!hasBlobStore()) {

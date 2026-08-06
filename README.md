@@ -98,6 +98,18 @@ you, do not fund the bot.
 run it on successive days and watch the paper position and equity curve develop
 before anything is deployed.
 
+### What the paper run records
+
+Every run appends a point holding the time, equity, BTC price, the trend filter
+value, what it decided and why. Price alone would only tell you what the run
+returned; price against the trend tells you how *close* each call was, which is
+what you need months later when asking whether `SMA_DAYS` should have been
+shorter. Read it from `/api/state`, or open "Show the numbers" on the dashboard.
+
+One point per calendar day — a second run the same day overwrites rather than
+duplicates, so triggering by hand does not distort the record. The last 800
+points are kept, about two years.
+
 ## Deploying
 
 1. Push this folder to a new GitHub repo.
@@ -145,6 +157,24 @@ being labelled "(paper)".
 To stop: set `KILL_SWITCH=true` and redeploy. To stop *and* sell, do the sale
 yourself in the Bitvavo app — the bot deliberately has no "panic sell" endpoint
 that could be triggered by anything other than its own rules.
+
+### Switching between paper and live
+
+The two ledgers are never mixed. Going live while a paper position is open would
+leave the bot certain it owns BTC it never bought: it would not re-enter, having
+recorded itself as long, and could not exit, having nothing to sell. It would
+sit inert with the stop loss dead and a dashboard showing a position that does
+not exist.
+
+So when `TRADING_ENABLED` changes what the bot actually is, the old ledger is
+copied to `<STATE_PREFIX>/archive/<mode>-<timestamp>.json` and the new mode
+starts from zero. Nothing is lost — the paper run is the record of how the
+strategy behaved, which is the entire point of running one — but it stops being
+treated as a position. Flip the switch back and the same thing happens in
+reverse.
+
+A state written before this existed has no mode recorded. It is adopted rather
+than reset, so upgrading does not throw away a paper run in progress.
 
 ## Endpoints
 

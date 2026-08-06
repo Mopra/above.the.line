@@ -169,22 +169,40 @@ export default async function Page() {
                     <th className="num">Bot</th>
                     <th className="num">Buy and hold</th>
                     <th className="num">BTC price</th>
+                    <th className="num">Trend</th>
+                    <th className="num">Gap</th>
+                    <th>Decided</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {[...points]
+                  {[...history]
                     .reverse()
                     .slice(0, 60)
-                    .map((p, i) => (
-                      <tr key={p.time}>
-                        <td>{new Date(p.time).toLocaleDateString('da-DK')}</td>
-                        <td className="num">{eur(p.equity)}</td>
-                        <td className="num">{eur(p.buyHold)}</td>
-                        <td className="num">
-                          €{history[history.length - 1 - i]?.price.toFixed(0)}
-                        </td>
-                      </tr>
-                    ))}
+                    .map((h, i) => {
+                      const p = [...points].reverse()[i];
+                      const gap =
+                        h.sma != null && h.sma > 0
+                          ? ((h.price - h.sma) / h.sma) * 100
+                          : null;
+                      return (
+                        <tr key={h.time}>
+                          <td>{new Date(h.time).toLocaleDateString('da-DK')}</td>
+                          <td className="num">{eur(p?.equity ?? h.equity)}</td>
+                          <td className="num">{eur(p?.buyHold ?? 0)}</td>
+                          <td className="num">€{h.price.toFixed(0)}</td>
+                          <td className="num">
+                            {h.sma == null ? '—' : `€${h.sma.toFixed(0)}`}
+                          </td>
+                          <td className={`num ${gap == null ? '' : gap >= 0 ? 'up' : 'down'}`}>
+                            {gap == null ? '—' : signedPct(gap)}
+                          </td>
+                          <td className="reason">
+                            {h.action ?? '—'}
+                            {h.note ? ` · ${h.note}` : ''}
+                          </td>
+                        </tr>
+                      );
+                    })}
                 </tbody>
               </table>
             </details>
