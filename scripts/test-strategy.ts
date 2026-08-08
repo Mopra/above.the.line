@@ -96,6 +96,40 @@ console.log('\nStop loss');
 
   const flat = decide(candles, 59, 'FLAT', null, params);
   ok('a flat position has no stop price', flat.stopPrice === null);
+  ok('a stop exit is flagged rather than inferred from its wording', atStop.isStop);
+  ok('an ordinary hold is not flagged as a stop', flat.isStop === false);
+}
+
+console.log('\nIntraday crash stop');
+{
+  const candles = makeCandles(Array.from({ length: 60 }, () => 100));
+  const params = { smaDays: 20, signalWeekday: 1, stopLossPct: 20, crashStopPct: 30 };
+
+  // Entry 150: daily stop sits at 120, crash stop at 105. The close is 100, so
+  // the ordinary stop already covers this one.
+  const both = decide(candles, 59, 'LONG', 150, params, 100);
+  ok('the daily-close stop still takes priority', both.action === 'EXIT');
+  ok('and reports itself as the close-based stop', both.reason.startsWith('Stop loss.'));
+
+  // Close comfortably above the daily stop, live price below the crash stop.
+  const crashing = makeCandles(Array.from({ length: 60 }, () => 200));
+  const c1 = decide(crashing, 59, 'LONG', 220, params, 150);
+  ok('intraday stop fires on the live price alone', c1.action === 'EXIT');
+  ok('it is flagged as a stop', c1.isStop === true);
+  ok('it says it did not wait for the close', c1.reason.includes('intraday'));
+
+  const c2 = decide(crashing, 59, 'LONG', 220, params, 190);
+  ok('no intraday exit while the live price is above the crash stop', c2.action !== 'EXIT');
+
+  // The backtest never supplies a live price, so the rule must stay inert.
+  const noLive = decide(crashing, 59, 'LONG', 220, params);
+  ok('without a live price the crash stop cannot fire', noLive.action !== 'EXIT');
+
+  const off = decide(crashing, 59, 'LONG', 220, { ...params, crashStopPct: 0 }, 10);
+  ok('crashStopPct 0 disables the intraday stop entirely', off.action !== 'EXIT');
+  ok('and reports no crash stop price', off.crashStopPrice === null);
+
+  close('crash stop sits 30% under entry', c1.crashStopPrice!, 220 * 0.7, 1e-9);
 }
 
 console.log('\nSignal cadence');

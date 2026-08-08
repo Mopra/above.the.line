@@ -7,6 +7,17 @@ export interface StrategyParams {
   signalWeekday: number;
   /** Hard stop, as a percentage below entry price. Checked daily. */
   stopLossPct: number;
+  /**
+   * Second, wider stop measured against the *live* price instead of the daily
+   * close, so a collapse does not have to wait for the bar to close. Optional,
+   * and inert unless `decide` is also handed a live price: the backtest never
+   * passes one, so a simulated run behaves exactly as it always did.
+   *
+   * Keep it wider than `stopLossPct`. Setting it narrower does not fail, but it
+   * makes the intraday stop the binding one and the daily-close stop dead
+   * weight, which is a different strategy from the one that was validated.
+   */
+  crashStopPct?: number;
 }
 
 export type Action = 'HOLD' | 'ENTER' | 'EXIT';
@@ -21,6 +32,14 @@ export interface Decision {
   isSignalDay: boolean;
   /** Price at which the hard stop would trigger, when a position is open. */
   stopPrice: number | null;
+  /** Live price at which the wider intraday stop would trigger, if configured. */
+  crashStopPrice: number | null;
+  /**
+   * True when this decision is a stop-loss exit of either kind. The caller uses
+   * it to let the exit skip the weekly cadence, so it must not be inferred from
+   * the wording of `reason` — a reworded message would silently trap a position.
+   */
+  isStop: boolean;
 }
 
 /** Simple moving average of the closes of the last `length` bars ending at `endIdx`. */
@@ -50,14 +69,21 @@ export function weekKey(timeMs: number): string {
  * The whole strategy, as one pure function.
  *
  * Rules, in priority order:
- *   1. If long and price has fallen stopLossPct below entry, exit today.
+ *   1. If long and the daily close has fallen stopLossPct below entry, exit.
  *      This is checked on every bar, not only on the weekly signal day.
- *   2. On the weekly signal day only:
+ *   2. If long and the *live* price has fallen crashStopPct below entry, exit
+ *      without waiting for the bar to close. Only active when a live price is
+ *      supplied, which the backtest deliberately never does.
+ *   3. On the weekly signal day only:
  *        - flat and close above the SMA  -> enter
  *        - long and close below the SMA  -> exit
- *   3. Otherwise hold.
+ *   4. Otherwise hold.
  *
  * Long-or-cash. No shorting, no leverage, no averaging in.
+ *
+ * `livePrice` is the current ticker, when the caller has one. It is used for
+ * rule 2 and nothing else: the trend, the entry and the exit all still read
+ * closed daily candles, so the shape of the strategy is unchanged.
  */
 export function decide(
   candles: Candle[],
@@ -65,48 +91,66 @@ export function decide(
   position: Position,
   entryPrice: number | null,
   params: StrategyParams,
+  livePrice?: number,
 ): Decision {
   const bar = candles[idx];
   const trend = sma(candles, idx, params.smaDays);
   const isSignalDay = new Date(bar.time).getUTCDay() === params.signalWeekday;
-  const stopPrice =
-    position === 'LONG' && entryPrice !== null
-      ? entryPrice * (1 - params.stopLossPct / 100)
-      : null;
+  const holding = position === 'LONG' && entryPrice !== null;
+  const stopPrice = holding ? entryPrice! * (1 - params.stopLossPct / 100) : null;
+  const crashPct = params.crashStopPct ?? 0;
+  const crashStopPrice =
+    holding && crashPct > 0 ? entryPrice! * (1 - crashPct / 100) : null;
 
-  if (position === 'LONG' && stopPrice !== null && bar.close <= stopPrice) {
+  // Every branch reports the same context; only the verdict differs.
+  const context = {
+    sma: trend,
+    close: bar.close,
+    isSignalDay,
+    stopPrice,
+    crashStopPrice,
+  };
+
+  if (stopPrice !== null && bar.close <= stopPrice) {
     return {
       action: 'EXIT',
+      isStop: true,
       reason:
         `Stop loss. Close EUR ${bar.close.toFixed(0)} is at or below the stop at ` +
         `EUR ${stopPrice.toFixed(0)} (${params.stopLossPct}% under the EUR ` +
         `${entryPrice!.toFixed(0)} entry).`,
-      sma: trend,
-      close: bar.close,
-      isSignalDay,
-      stopPrice,
+      ...context,
+    };
+  }
+
+  if (crashStopPrice !== null && livePrice !== undefined && livePrice <= crashStopPrice) {
+    return {
+      action: 'EXIT',
+      isStop: true,
+      reason:
+        `Stop loss, intraday. Live price EUR ${livePrice.toFixed(0)} is at or below ` +
+        `the crash stop at EUR ${crashStopPrice.toFixed(0)} (${crashPct}% under the ` +
+        `EUR ${entryPrice!.toFixed(0)} entry). Not waiting for the daily close.`,
+      ...context,
     };
   }
 
   if (trend === null) {
     return {
       action: 'HOLD',
+      isStop: false,
       reason: `Not enough history yet: the ${params.smaDays}-day average needs more bars.`,
+      ...context,
       sma: null,
-      close: bar.close,
-      isSignalDay,
-      stopPrice,
     };
   }
 
   if (!isSignalDay) {
     return {
       action: 'HOLD',
+      isStop: false,
       reason: 'Not the weekly signal day. Only the stop loss is live today.',
-      sma: trend,
-      close: bar.close,
-      isSignalDay,
-      stopPrice,
+      ...context,
     };
   }
 
@@ -116,38 +160,32 @@ export function decide(
   if (position === 'FLAT' && above) {
     return {
       action: 'ENTER',
+      isStop: false,
       reason:
         `Weekly signal: close EUR ${bar.close.toFixed(0)} is ${gapPct.toFixed(1)}% above ` +
         `the ${params.smaDays}-day average of EUR ${trend.toFixed(0)}. Uptrend, go long.`,
-      sma: trend,
-      close: bar.close,
-      isSignalDay,
-      stopPrice,
+      ...context,
     };
   }
 
   if (position === 'LONG' && !above) {
     return {
       action: 'EXIT',
+      isStop: false,
       reason:
         `Weekly signal: close EUR ${bar.close.toFixed(0)} is ${Math.abs(gapPct).toFixed(1)}% ` +
         `below the ${params.smaDays}-day average of EUR ${trend.toFixed(0)}. Trend over, go to cash.`,
-      sma: trend,
-      close: bar.close,
-      isSignalDay,
-      stopPrice,
+      ...context,
     };
   }
 
   return {
     action: 'HOLD',
+    isStop: false,
     reason:
       position === 'LONG'
         ? `Still above the ${params.smaDays}-day average by ${gapPct.toFixed(1)}%. Stay long.`
         : `Still below the ${params.smaDays}-day average by ${Math.abs(gapPct).toFixed(1)}%. Stay in cash.`,
-    sma: trend,
-    close: bar.close,
-    isSignalDay,
-    stopPrice,
+    ...context,
   };
 }

@@ -40,6 +40,7 @@ function params(): StrategyParams {
     smaDays: config.smaDays,
     signalWeekday: config.signalWeekday,
     stopLossPct: config.stopLossPct,
+    crashStopPct: config.crashStopPct,
   };
 }
 
@@ -119,7 +120,12 @@ export async function runOnce(): Promise<RunReport> {
   }
   state.mode = modeNow;
 
-  const all = await fetchDailyCandles(config.market, 2500);
+  // Only the trend window is ever read, and the job now runs every hour, so ask
+  // for little enough that Bitvavo answers in a single page instead of two.
+  const all = await fetchDailyCandles(
+    config.market,
+    Math.max(config.smaDays + 60, 400),
+  );
   const candles = closedCandles(all, now);
   if (candles.length < config.smaDays + 2) {
     throw new Error(
@@ -128,9 +134,11 @@ export async function runOnce(): Promise<RunReport> {
   }
   const idx = candles.length - 1;
   const bar = candles[idx];
-  const d = decide(candles, idx, state.position, state.entryPrice, params());
 
+  // Read the ticker before deciding: the intraday crash stop is measured against
+  // the live price, which is the entire reason this job runs more than daily.
   const livePrice = await fetchTicker(config.market);
+  const d = decide(candles, idx, state.position, state.entryPrice, params(), livePrice);
 
   // Seed the paper-trading wallet the first time the bot ever runs.
   if (state.simCashEur === null) state.simCashEur = config.maxAllocationEur;
@@ -179,8 +187,10 @@ export async function runOnce(): Promise<RunReport> {
 
   let action = d.action;
 
-  // A stop-loss exit ignores the weekly cadence. Everything else obeys it.
-  const isStopExit = action === 'EXIT' && d.reason.startsWith('Stop loss');
+  // A stop-loss exit of either kind ignores the weekly cadence. Everything else
+  // obeys it. This reads the flag rather than the wording of the reason, because
+  // a reworded message would quietly trap the position with the stop disabled.
+  const isStopExit = action === 'EXIT' && d.isStop;
   const currentWeek = weekKey(bar.time);
   if (action !== 'HOLD' && !isStopExit) {
     if (state.lastSignalWeek === currentWeek) {

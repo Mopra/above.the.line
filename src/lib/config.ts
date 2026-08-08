@@ -35,6 +35,14 @@ export const config = {
   smaDays: num('SMA_DAYS', 140),
   signalWeekday: num('SIGNAL_WEEKDAY', 1),
   stopLossPct: num('STOP_LOSS_PCT', 20),
+  /**
+   * The wider stop that reads the live price rather than the daily close, so a
+   * collapse is caught within the hour instead of at the next close. Set it to 0
+   * to switch intraday stopping off entirely and behave exactly as the backtest
+   * models. It is deliberately wider than STOP_LOSS_PCT: a tight intraday stop
+   * would fire on wicks the backtest never saw.
+   */
+  crashStopPct: num('CRASH_STOP_PCT', 30),
   maxTradesPerMonth: num('MAX_TRADES_PER_MONTH', 6),
 
   statePrefix: process.env.STATE_PREFIX ?? 'default',

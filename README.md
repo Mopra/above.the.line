@@ -4,7 +4,7 @@ Holds BTC while the close is above its long moving average, and sits in cash bel
 it. That single rule is the whole name and the whole strategy.
 
 A weekly, long-or-cash trend follower for BTC-EUR on Bitvavo. Next.js on Vercel:
-one daily cron job makes the decisions, and the front page is a dashboard showing
+an hourly cron job makes the decisions, and the front page is a dashboard showing
 what it did and why.
 
 Built for about DKK 1,000 of play money. Read the next section before you fund it.
@@ -57,20 +57,54 @@ The bot cannot move money out of your account, by construction:
 - **Universe:** BTC-EUR only.
 - **Signal:** once a week (default Monday), on the last *closed* daily candle.
   Close above the `SMA_DAYS` moving average → long. Below → cash.
-- **Stop loss:** checked **every** day, not just on the signal day. If price falls
-  `STOP_LOSS_PCT` below the entry price, it exits immediately.
+- **Stop loss:** checked **every** run, not just on the signal day. Two levels,
+  described below.
 - **Sizing:** all in or all out, capped by `MAX_ALLOCATION_EUR`.
 
 The whole thing is one pure function in `src/lib/strategy.ts`. If you want to
 change the rules, that is the only file that decides anything.
 
+### The two stops
+
+The entry and the trend filter both read closed daily candles, so they cannot
+react faster than once a day no matter how often the job runs. The stop is the
+only rule where speed buys you anything, so there are two of them:
+
+| Stop | Measured against | Default | Purpose |
+|---|---|---|---|
+| `STOP_LOSS_PCT` | the last **daily close** | 20% | The stop the backtest models. Unchanged. |
+| `CRASH_STOP_PCT` | the **live** ticker price | 30% | Catches a collapse within the hour instead of at the next close. |
+
+Keeping the crash stop wider than the ordinary one is the whole point. A tight
+intraday stop fires on wicks the backtest never saw, and for a trend follower
+that historically costs return rather than saving it. The wide one only triggers
+in the case the daily stop genuinely handles badly: a fast collapse that would
+otherwise sit unactioned until the next close.
+
+Set `CRASH_STOP_PCT=0` to switch intraday stopping off entirely and behave
+exactly as the backtest models.
+
+**This part is not backtested, and cannot honestly be.** The backtest walks daily
+candles and never passes a live price, so `decide()` skips the intraday rule
+during a simulation — a simulated run behaves precisely as it always did. That
+means the out-of-sample number still describes the daily-close strategy, and says
+nothing about the crash stop. Treat the crash stop as insurance you have chosen
+to buy, not as a tested edge.
+
 ### When a signal actually executes
 
-Decisions only ever use *closed* daily candles, so the job running at 07:00 UTC
-reads yesterday's bar. With `SIGNAL_WEEKDAY=1` that means the Monday close is the
-signal, and the order goes in on **Tuesday** morning. The backtest fills at the
-close of the deciding bar, so reality lags it by roughly a day. On a 140-day
-trend filter that gap is noise, but it is real and it is not modelled.
+Entry and exit decisions only ever use *closed* daily candles, so the first run
+after midnight UTC reads yesterday's bar. With `SIGNAL_WEEKDAY=1` that means the
+Monday close is the signal, and the order goes in during the early hours of
+**Tuesday**. The backtest fills at the close of the deciding bar, so reality lags
+it by up to an hour now rather than a day. On a 140-day trend filter that gap is
+noise either way, but it is real and it is not modelled.
+
+Running hourly does **not** make entries or weekly exits any faster: within a
+single UTC day the last closed candle is identical, so the extra runs re-evaluate
+the same bar and reach the same verdict. A weekly signal is also guarded by an
+ISO week key, so it can only act once per week however often the job fires. The
+only rule that genuinely benefits from the cadence is the intraday crash stop.
 
 ## Getting started
 
@@ -131,8 +165,10 @@ points are kept, about two years.
 ### About the Vercel Hobby plan
 
 Hobby allows **one cron run per day**, and the timing drifts by up to 59 minutes.
-That is fine here: signals are weekly and the daily run is only there to check the
-stop loss. A more frequent schedule fails at deploy time on Hobby.
+The hourly schedule in `vercel.json` therefore needs a paid plan; on Hobby the
+deploy is rejected. If you are on Hobby, set the schedule back to `0 7 * * *` and
+`CRASH_STOP_PCT=0`, since an intraday stop that is only checked once a day is
+just a worse version of the daily one.
 
 ## Going live
 
