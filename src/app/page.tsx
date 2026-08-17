@@ -15,10 +15,6 @@ const WEEKDAYS = [
   'Saturday',
 ];
 
-function dkk(eur: number): string {
-  return `kr ${Math.round(eur * config.dkkPerEur).toLocaleString('da-DK')}`;
-}
-
 function eur(n: number): string {
   return `€${n.toFixed(2)}`;
 }
@@ -72,9 +68,14 @@ function nextRun(now: number): number {
 
 export default async function Page() {
   const state = await loadState();
-  const startEquity = config.maxAllocationEur;
-
   const history = state.history;
+
+  // What the account was worth when this ledger started. Ledgers written before
+  // the engine recorded that fall back to their first snapshot; a brand-new bot
+  // that has never run falls back to the allocation cap, the only number known.
+  const startEquity =
+    state.startEquityEur ?? history[0]?.equity ?? config.maxAllocationEur;
+
   const latest = history[history.length - 1] ?? null;
   const equityNow = latest?.equity ?? startEquity;
   const returnPct = (equityNow / startEquity - 1) * 100;
@@ -148,9 +149,9 @@ export default async function Page() {
 
       <div className="card">
         <p className="hero-label">Portfolio value</p>
-        <p className="hero">{dkk(equityNow)}</p>
+        <p className="hero">{eur(equityNow)}</p>
         <p className={`hero-delta ${deltaClass}`}>
-          {signedPct(returnPct)} since start · {eur(equityNow)} of {eur(startEquity)}
+          {signedPct(returnPct)} since start · began with {eur(startEquity)}
         </p>
       </div>
 
@@ -169,17 +170,17 @@ export default async function Page() {
         </div>
         <div className="card">
           <p className="tile-label">Realised gains</p>
-          <p className="tile-value">{dkk(state.realisedGains)}</p>
+          <p className="tile-value">{eur(state.realisedGains)}</p>
           <p className="tile-note">rubrik 20 · {tax.gainsDkk.toFixed(0)} kr</p>
         </div>
         <div className="card">
           <p className="tile-label">Realised losses</p>
-          <p className="tile-value">{dkk(state.realisedLosses)}</p>
+          <p className="tile-value">{eur(state.realisedLosses)}</p>
           <p className="tile-note">rubrik 58 · {tax.lossesDkk.toFixed(0)} kr</p>
         </div>
         <div className="card">
           <p className="tile-label">Fees paid</p>
-          <p className="tile-value">{dkk(state.totalFees)}</p>
+          <p className="tile-value">{eur(state.totalFees)}</p>
           <p className="tile-note">
             {((state.totalFees / startEquity) * 100).toFixed(1)}% of capital ·{' '}
             {state.trades.length} trades

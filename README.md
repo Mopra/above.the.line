@@ -223,9 +223,9 @@ than reset, so upgrading does not throw away a paper run in progress.
 
 ## Tax reporting
 
-The dashboard shows realised gains (rubrik 20) and losses (rubrik 58) separately
-in DKK, because Danish rules treat them differently and forbid netting. `/api/state`
-returns the same figures as JSON.
+The dashboard shows realised gains (rubrik 20) and losses (rubrik 58) separately,
+with the DKK figures for the tax return alongside, because Danish rules treat
+them differently and forbid netting. `/api/state` returns the same figures as JSON.
 
 Two caveats. The FIFO ledger only knows about coins **this bot** bought — if you
 hold BTC anywhere else, FIFO spans that too and the real figures differ. And the

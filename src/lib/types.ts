@@ -93,6 +93,14 @@ export interface BotState {
    */
   simCashEur: number | null;
   /**
+   * Account value at this ledger's first run, the baseline for "since start".
+   * MAX_ALLOCATION_EUR is a spending cap, not the money that was deposited, so
+   * measuring returns against it invents a gain or loss the moment the two
+   * differ. null means "not recorded yet"; the engine seeds it once and never
+   * touches it again.
+   */
+  startEquityEur: number | null;
+  /**
    * Which wallet this ledger belongs to. Paper and live positions cannot share
    * one: going live while holding a paper position would leave the bot certain
    * it owns BTC it never bought. The engine archives and starts clean when this
@@ -122,6 +130,7 @@ export function initialState(): BotState {
     trades: [],
     history: [],
     simCashEur: null,
+    startEquityEur: null,
     mode: null,
     halted: false,
     haltReason: null,

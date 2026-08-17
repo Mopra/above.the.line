@@ -156,6 +156,12 @@ export async function runOnce(): Promise<RunReport> {
   // paper run still produces a meaningful equity curve with no money at risk.
   let cashEur = live ? exchangeEur : state.simCashEur;
 
+  // Seeded before the hard-limit blocks below, so even a first run that gets
+  // blocked records the baseline the dashboard measures "since start" against.
+  if (state.startEquityEur === null) {
+    state.startEquityEur = equity(state, livePrice, cashEur);
+  }
+
   const block = (why: string): RunReport => ({
     ranAt: now,
     live: false,
